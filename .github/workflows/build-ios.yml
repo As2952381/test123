@@ -2,11 +2,6 @@ name: Build iOS WeChatRedPacket
 
 on:
   workflow_dispatch:
-    inputs:
-      ipa_url:
-        description: 'Decrypted WeChat IPA download URL (optional)'
-        required: false
-        type: string
 
 jobs:
   build:
@@ -16,112 +11,75 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: brew install ldid 2>/dev/null || true
-
       - name: Build dylib
         run: |
           make
           file libWeChatRedPacket.dylib
-          echo "dylib build done"
+          echo "Build done"
 
-      - name: Download decrypted WeChat IPA
+      - name: Download WeChat IPA
         run: |
-          DL_URL="${{ inputs.ipa_url }}"
-
+          echo "Searching for decrypted WeChat IPA..."
+          PAGE=$(curl -sL "https://decrypt.day/app/id414478124" 2>/dev/null || true)
+          DL_URL=$(echo "$PAGE" | grep -oE 'https?://[^"'"'"' ]*decrypt[^"'"'"' ]*\.ipa' | head -1)
           if [ -z "$DL_URL" ]; then
-            echo "Searching for decrypted WeChat IPA..."
-
-            # Method 1: decrypt.day
-            PAGE=$(curl -sL "https://decrypt.day/app/id414478124" 2>/dev/null || true)
-            DL_URL=$(echo "$PAGE" | grep -oE 'https?://[^"'"'"' ]*decrypt[^"'"'"' ]*\.ipa' | head -1)
-            if [ -z "$DL_URL" ]; then
-              DL_URL=$(echo "$PAGE" | grep -oE 'href="[^"]*download[^"]*"' | grep -oE 'https?://[^"]*' | head -1)
-            fi
-
-            # Method 2: armconverter
-            if [ -z "$DL_URL" ]; then
-              echo "Trying armconverter..."
-              DL_URL=$(curl -sL "https://armconverter.com/decryptedappstore" 2>/dev/null | \
-                grep -i "wechat" | grep -oE 'https?://[^"'"'"' ]*\.ipa' | head -1)
-            fi
-
-            # Method 3: backup sources
-            if [ -z "$DL_URL" ]; then
-              echo "Trying backup sources..."
-              for url in \
-                "https://decrypt.day/dl/wechat" \
-                "https://decrypt.day/download/414478124"; do
-                STATUS=$(curl -sL -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
-                if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
-                  DL_URL="$url"
-                  break
-                fi
-              done
-            fi
+            DL_URL=$(echo "$PAGE" | grep -oE 'href="[^"]*download[^"]*"' | grep -oE 'https?://[^"]*' | head -1)
           fi
-
           if [ -z "$DL_URL" ]; then
-            echo "ERROR: Cannot find decrypted IPA. Please provide a URL manually."
+            echo "Trying backup..."
+            DL_URL=$(curl -sL "https://armconverter.com/decryptedappstore" 2>/dev/null | grep -i "wechat" | grep -oE 'https?://[^"'"'"' ]*\.ipa' | head -1)
+          fi
+          if [ -z "$DL_URL" ]; then
+            echo "ERROR: Cannot find IPA"
             exit 1
           fi
-
           echo "Downloading: $DL_URL"
           curl -L -o WeChat.ipa "$DL_URL" --connect-timeout 30 --max-time 600
           if [ ! -f WeChat.ipa ] || [ $(stat -f%z WeChat.ipa 2>/dev/null || stat -c%s WeChat.ipa) -lt 10000000 ]; then
-            echo "ERROR: IPA download failed or file too small"
+            echo "ERROR: Download failed"
             exit 1
           fi
-          echo "IPA downloaded ($(du -h WeChat.ipa | cut -f1))"
+          echo "IPA downloaded"
 
-      - name: Inject dylib
+      - name: Inject and sign
         run: |
           mkdir -p _work
           unzip -q WeChat.ipa -d _work
-
           APP_DIR=$(find _work/Payload -name "*.app" -type d | head -1)
           echo "APP: $APP_DIR"
           cp libWeChatRedPacket.dylib "$APP_DIR/"
-
           BINARY="$APP_DIR/$(basename "$APP_DIR" .app)"
-          install_name_tool -change @rpath/libWeChatRedPacket.dylib \
-            @executable_path/libWeChatRedPacket.dylib "$BINARY" 2>/dev/null || true
 
           if command -v optool &>/dev/null; then
             optool install -c load -p "@executable_path/libWeChatRedPacket.dylib" -t "$BINARY"
           else
             python3 -c "
 import struct
-dylib_path = b'@executable_path/libWeChatRedPacket.dylib\x00'
-dylib_path = dylib_path + b'\x00' * ((8 - len(dylib_path) % 8) % 8)
-lc = struct.pack('<II', 0x18, len(dylib_path) + 8) + dylib_path
-with open('$BINARY', 'rb') as f: data = f.read()
-magic = struct.unpack('<I', data[:4])[0]
-header_size = 32 if magic == 0xFEEDFACF else 28
-ncmds = struct.unpack('<I', data[16:20])[0]
-new_data = data[:header_size] + lc + data[header_size:]
-new_ncmds = ncmds + 1
-new_data = new_data[:16] + struct.pack('<I', new_ncmds) + new_data[20:]
-with open('$BINARY', 'wb') as f: f.write(new_data)
-            " || echo "Manual injection failed"
+p = b'@executable_path/libWeChatRedPacket.dylib\x00'
+p = p + b'\x00' * ((8 - len(p) % 8) % 8)
+lc = struct.pack('<II', 0x18, len(p) + 8) + p
+with open('$BINARY', 'rb') as f: d = f.read()
+m = struct.unpack('<I', d[:4])[0]
+hs = 32 if m == 0xFEEDFACF else 28
+nc = struct.unpack('<I', d[16:20])[0]
+nd = d[:hs] + lc + d[hs:]
+nd = nd[:16] + struct.pack('<I', nc+1) + nd[20:]
+with open('$BINARY', 'wb') as f: f.write(nd)
+            "
           fi
-          echo "dylib injection done"
 
-      - name: Ad-hoc sign
-        run: |
-          APP_DIR=$(find _work/Payload -name "*.app" -type d | head -1)
           ldid -S "$APP_DIR/libWeChatRedPacket.dylib" 2>/dev/null || \
             codesign --force --sign - --timestamp=none "$APP_DIR/libWeChatRedPacket.dylib"
           ldid -S "$APP_DIR" 2>/dev/null || \
             codesign --force --sign - --timestamp=none "$APP_DIR"
-          echo "Signing done"
+          echo "Done"
 
       - name: Package IPA
         run: |
           cd _work
           zip -qr ../WeChat_RedPacket.ipa Payload/
           cd ..
-          echo "WeChat_RedPacket.ipa ready"
+          echo "Packaged"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
