@@ -2,6 +2,11 @@ name: "iOS WeChatRedPacket Build"
 
 on:
   workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "脱壳微信 IPA 下载链接（可选，留空则自动搜索）"
+        required: false
+        type: string
 
 jobs:
   build:
@@ -15,23 +20,36 @@ jobs:
       - name: Download decrypted WeChat IPA
         run: |
           set -e
-          echo "Searching for decrypted WeChat IPA..."
-          DL_URL=""
-          PAGE=$(curl -sL "https://decrypt.day/app/id414478124" 2>/dev/null || true)
-          DL_URL=$(echo "$PAGE" | grep -oE "https?://[^\"]*decrypt[^\"]*\.ipa" | head -1 || true)
-          if [ -z "$DL_URL" ]; then
-            DL_URL=$(echo "$PAGE" | grep -oE "href=\"[^\"]*download[^\"]*\"" | grep -oE "https?://[^\"]*" | head -1 || true)
+          DL_URL="${{ inputs.ipa_url }}"
+
+          if [ -n "$DL_URL" ]; then
+            echo "Using provided URL: $DL_URL"
+          else
+            echo "Searching for decrypted WeChat IPA..."
+            PAGE=$(curl -sL "https://decrypt.day/app/id414478124" 2>/dev/null || true)
+            DL_URL=$(echo "$PAGE" | grep -oE "https?://[^\"]*decrypt[^\"]*\.ipa" | head -1 || true)
+            if [ -z "$DL_URL" ]; then
+              DL_URL=$(echo "$PAGE" | grep -oE "href=\"[^\"]*download[^\"]*\"" | grep -oE "https?://[^\"]*" | head -1 || true)
+            fi
+            if [ -z "$DL_URL" ]; then
+              DL_URL=$(curl -sL "https://armconverter.com/decryptedappstore" 2>/dev/null | grep -i "wechat" | grep -oE "https?://[^\"]*\.ipa" | head -1 || true)
+            fi
           fi
+
           if [ -z "$DL_URL" ]; then
-            DL_URL=$(curl -sL "https://armconverter.com/decryptedappstore" 2>/dev/null | grep -i "wechat" | grep -oE "https?://[^\"]*\.ipa" | head -1 || true)
-          fi
-          if [ -z "$DL_URL" ]; then
-            echo "ERROR: Cannot find decrypted IPA"
+            echo "ERROR: Cannot find decrypted IPA."
+            echo "Please find a decrypted WeChat IPA URL and re-run with the URL."
+            echo "Sources: decrypt.day, ipaom.com, armconverter.com"
             exit 1
           fi
+
           echo "Downloading: $DL_URL"
           curl -L -o WeChat.ipa "$DL_URL" --connect-timeout 30 --max-time 600
-          echo "IPA downloaded"
+          if [ ! -f WeChat.ipa ]; then
+            echo "ERROR: Download failed"
+            exit 1
+          fi
+          echo "IPA downloaded ($(du -h WeChat.ipa | cut -f1))"
 
       - name: Inject dylib and sign
         run: |
@@ -56,7 +74,7 @@ jobs:
           cd _work
           zip -qr ../WeChat_RedPacket.ipa Payload/
           cd ..
-          echo "IPA packaged"
+          echo "WeChat_RedPacket.ipa ready"
 
       - uses: actions/upload-artifact@v4
         with:
