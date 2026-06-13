@@ -1,0 +1,64 @@
+name: "iOS WeChatRedPacket Build"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build dylib
+        run: make
+
+      - name: Download decrypted WeChat IPA
+        run: |
+          set -e
+          echo "Searching for decrypted WeChat IPA..."
+          DL_URL=""
+          PAGE=$(curl -sL "https://decrypt.day/app/id414478124" 2>/dev/null || true)
+          DL_URL=$(echo "$PAGE" | grep -oE "https?://[^\"]*decrypt[^\"]*\.ipa" | head -1 || true)
+          if [ -z "$DL_URL" ]; then
+            DL_URL=$(echo "$PAGE" | grep -oE "href=\"[^\"]*download[^\"]*\"" | grep -oE "https?://[^\"]*" | head -1 || true)
+          fi
+          if [ -z "$DL_URL" ]; then
+            DL_URL=$(curl -sL "https://armconverter.com/decryptedappstore" 2>/dev/null | grep -i "wechat" | grep -oE "https?://[^\"]*\.ipa" | head -1 || true)
+          fi
+          if [ -z "$DL_URL" ]; then
+            echo "ERROR: Cannot find decrypted IPA"
+            exit 1
+          fi
+          echo "Downloading: $DL_URL"
+          curl -L -o WeChat.ipa "$DL_URL" --connect-timeout 30 --max-time 600
+          echo "IPA downloaded"
+
+      - name: Inject dylib and sign
+        run: |
+          set -e
+          mkdir -p _work
+          unzip -q WeChat.ipa -d _work
+          APP_DIR=$(find _work/Payload -name "*.app" -type d | head -1)
+          echo "APP: $APP_DIR"
+          cp libWeChatRedPacket.dylib "$APP_DIR/"
+          BINARY="$APP_DIR/$(basename "$APP_DIR" .app)"
+          if command -v optool > /dev/null 2>&1; then
+            optool install -c load -p "@executable_path/libWeChatRedPacket.dylib" -t "$BINARY"
+          else
+            python3 -c "import struct; p=b'@executable_path/libWeChatRedPacket.dylib\x00'; p=p+b'\x00'*((8-len(p)%8)%8); lc=struct.pack('<II',0x18,len(p)+8)+p; f=open('$BINARY','rb'); d=f.read(); f.close(); m=struct.unpack('<I',d[:4])[0]; hs=32 if m==0xFEEDFACF else 28; nc=struct.unpack('<I',d[16:20])[0]; nd=d[:hs]+lc+d[hs:]; nd=nd[:16]+struct.pack('<I',nc+1)+nd[20:]; f=open('$BINARY','wb'); f.write(nd); f.close()"
+          fi
+          codesign --force --sign - --timestamp=none "$APP_DIR/libWeChatRedPacket.dylib" 2>/dev/null || true
+          codesign --force --sign - --timestamp=none "$APP_DIR" 2>/dev/null || true
+          echo "Injection and signing done"
+
+      - name: Package IPA
+        run: |
+          cd _work
+          zip -qr ../WeChat_RedPacket.ipa Payload/
+          cd ..
+          echo "IPA packaged"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WeChat_RedPacket
+          path: WeChat_RedPacket.ipa
