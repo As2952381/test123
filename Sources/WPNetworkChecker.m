@@ -9,11 +9,6 @@
 
 @implementation WPNetworkChecker
 
-// 声明私有 API（兼容不导出 CaptiveNetwork 的 SDK 版本）
-extern CFArrayRef CNCopySupportedInterfaces(void);
-extern CFDictionaryRef CNCopyCurrentNetworkInfo(CFStringRef interfaceName);
-extern CFStringRef kCNNetworkInfoKeySSID;
-
 + (BOOL)isWifiConnected {
     NSArray *interfaceNames = CFBridgingRelease(
         CNCopySupportedInterfaces());
