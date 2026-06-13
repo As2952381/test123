@@ -1,15 +1,7 @@
-name: 编译 WeChatRedPacket + 注入 IPA
+name: 编译 iOS 微信红包插件
 
 on:
   workflow_dispatch:
-    inputs:
-      ipa_url:
-        description: '脱壳微信 IPA 下载链接'
-        required: true
-      cert_name:
-        description: '证书名称 (留空用 ad-hoc 签名)'
-        required: false
-        default: '-'
 
 jobs:
   build:
@@ -29,14 +21,51 @@ jobs:
           file libWeChatRedPacket.dylib
           echo "✅ dylib 编译完成"
 
-      - name: 下载脱壳微信 IPA
+      - name: 自动获取脱壳微信 IPA
         run: |
-          curl -L -o WeChat.ipa "${{ github.event.inputs.ipa_url }}"
-          if [ ! -f WeChat.ipa ]; then
-            echo "❌ IPA 下载失败"
+          echo "🔍 搜索脱壳微信 IPA..."
+
+          # 方案1: decrypt.day
+          echo "  尝试 decrypt.day..."
+          PAGE=$(curl -sL "https://decrypt.day/app/id414478124" 2>/dev/null || true)
+          DL_URL=$(echo "$PAGE" | grep -oE 'https?://[^"'"'"' ]*decrypt[^"'"'"' ]*\.ipa' | head -1)
+          if [ -z "$DL_URL" ]; then
+            DL_URL=$(echo "$PAGE" | grep -oE 'href="[^"]*download[^"]*"' | grep -oE 'https?://[^"]*' | head -1)
+          fi
+
+          # 方案2: armconverter
+          if [ -z "$DL_URL" ]; then
+            echo "  尝试 armconverter..."
+            DL_URL=$(curl -sL "https://armconverter.com/decryptedappstore" 2>/dev/null | \
+              grep -i "wechat" | grep -oE 'https?://[^"'"'"' ]*\.ipa' | head -1)
+          fi
+
+          # 方案3: 已知备用源
+          if [ -z "$DL_URL" ]; then
+            echo "  尝试备用源..."
+            for url in \
+              "https://decrypt.day/dl/wechat" \
+              "https://decrypt.day/download/414478124"; do
+              STATUS=$(curl -sL -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
+              if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
+                DL_URL="$url"
+                break
+              fi
+            done
+          fi
+
+          if [ -z "$DL_URL" ]; then
+            echo "❌ 自动获取失败，请手动提供 IPA 链接"
             exit 1
           fi
-          echo "✅ IPA 下载完成"
+
+          echo "📥 下载: $DL_URL"
+          curl -L -o WeChat.ipa "$DL_URL" --connect-timeout 30 --max-time 600
+          if [ ! -f WeChat.ipa ] || [ $(stat -f%z WeChat.ipa 2>/dev/null || stat -c%s WeChat.ipa) -lt 10000000 ]; then
+            echo "❌ IPA 下载失败或文件过小"
+            exit 1
+          fi
+          echo "✅ IPA 下载完成 ($(du -h WeChat.ipa | cut -f1))"
 
       - name: 注入 dylib
         run: |
