@@ -1,0 +1,110 @@
+name: 编译 WeChatRedPacket + 注入 IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: '脱壳微信 IPA 下载链接'
+        required: true
+      cert_name:
+        description: '证书名称 (留空用 ad-hoc 签名)'
+        required: false
+        default: '-'
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装依赖
+        run: |
+          brew install ldid 2>/dev/null || true
+
+      - name: 编译 dylib
+        run: |
+          make
+          file libWeChatRedPacket.dylib
+          echo "✅ dylib 编译完成"
+
+      - name: 下载脱壳微信 IPA
+        run: |
+          curl -L -o WeChat.ipa "${{ github.event.inputs.ipa_url }}"
+          if [ ! -f WeChat.ipa ]; then
+            echo "❌ IPA 下载失败"
+            exit 1
+          fi
+          echo "✅ IPA 下载完成"
+
+      - name: 注入 dylib
+        run: |
+          # 解压 IPA
+          mkdir -p _work
+          unzip -q WeChat.ipa -d _work
+
+          # 找 .app
+          APP_DIR=$(find _work/Payload -name "*.app" -type d | head -1)
+          echo "APP: $APP_DIR"
+
+          # 复制 dylib
+          cp libWeChatRedPacket.dylib "$APP_DIR/"
+
+          # 注入到二进制
+          BINARY="$APP_DIR/$(basename "$APP_DIR" .app)"
+          install_name_tool -change @rpath/libWeChatRedPacket.dylib \
+            @executable_path/libWeChatRedPacket.dylib "$BINARY" 2>/dev/null || true
+
+          # 用 optool 插入 load command
+          if command -v optool &>/dev/null; then
+            optool install -c load -p "@executable_path/libWeChatRedPacket.dylib" -t "$BINARY"
+          else
+            # 手动添加 LC_LOAD_DYLIB
+            python3 -c "
+import struct, sys
+dylib_path = b'@executable_path/libWeChatRedPacket.dylib\x00'
+dylib_path = dylib_path + b'\x00' * ((8 - len(dylib_path) % 8) % 8)
+lc = struct.pack('<II', 0x18, len(dylib_path) + 8) + dylib_path
+with open('$BINARY', 'rb') as f: data = f.read()
+# 找到最后一个 load command 末尾
+import struct
+magic = struct.unpack('<I', data[:4])[0]
+if magic == 0xFEEDFACF:  # 64-bit
+    header_size = 32
+    ncmds = struct.unpack('<I', data[16:20])[0]
+else:
+    header_size = 28
+    ncmds = struct.unpack('<I', data[16:20])[0]
+# 插入新 LC
+new_data = data[:header_size] + lc + data[header_size:]
+new_ncmds = ncmds + 1
+new_data = new_data[:16] + struct.pack('<I', new_ncmds) + new_data[20:]
+with open('$BINARY', 'wb') as f: f.write(new_data)
+            " || echo "手动注入失败，尝试 optool"
+          fi
+
+          echo "✅ dylib 注入完成"
+
+      - name: Ad-hoc 签名
+        run: |
+          APP_DIR=$(find _work/Payload -name "*.app" -type d | head -1)
+          # ad-hoc 签名 (不需要证书)
+          ldid -S "$APP_DIR/libWeChatRedPacket.dylib" 2>/dev/null || \
+            codesign --force --sign - --timestamp=none "$APP_DIR/libWeChatRedPacket.dylib"
+          ldid -S "$APP_DIR" 2>/dev/null || \
+            codesign --force --sign - --timestamp=none "$APP_DIR"
+          echo "✅ 签名完成"
+
+      - name: 打包 IPA
+        run: |
+          cd _work
+          zip -qr ../WeChat_RedPacket.ipa Payload/
+          cd ..
+          echo "✅ WeChat_RedPacket.ipa 打包完成"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: WeChat_RedPacket
+          path: WeChat_RedPacket.ipa
