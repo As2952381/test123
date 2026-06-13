@@ -1,138 +1,129 @@
-name: 编译 iOS 微信红包插件
+name: Build iOS WeChatRedPacket
 
 on:
   workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: 'Decrypted WeChat IPA download URL (optional)'
+        required: false
+        type: string
 
 jobs:
   build:
     runs-on: macos-14
 
     steps:
-      - name: 检出代码
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 安装依赖
-        run: |
-          brew install ldid 2>/dev/null || true
+      - name: Install dependencies
+        run: brew install ldid 2>/dev/null || true
 
-      - name: 编译 dylib
+      - name: Build dylib
         run: |
           make
           file libWeChatRedPacket.dylib
-          echo "✅ dylib 编译完成"
+          echo "dylib build done"
 
-      - name: 自动获取脱壳微信 IPA
+      - name: Download decrypted WeChat IPA
         run: |
-          echo "🔍 搜索脱壳微信 IPA..."
+          DL_URL="${{ inputs.ipa_url }}"
 
-          # 方案1: decrypt.day
-          echo "  尝试 decrypt.day..."
-          PAGE=$(curl -sL "https://decrypt.day/app/id414478124" 2>/dev/null || true)
-          DL_URL=$(echo "$PAGE" | grep -oE 'https?://[^"'"'"' ]*decrypt[^"'"'"' ]*\.ipa' | head -1)
           if [ -z "$DL_URL" ]; then
-            DL_URL=$(echo "$PAGE" | grep -oE 'href="[^"]*download[^"]*"' | grep -oE 'https?://[^"]*' | head -1)
+            echo "Searching for decrypted WeChat IPA..."
+
+            # Method 1: decrypt.day
+            PAGE=$(curl -sL "https://decrypt.day/app/id414478124" 2>/dev/null || true)
+            DL_URL=$(echo "$PAGE" | grep -oE 'https?://[^"'"'"' ]*decrypt[^"'"'"' ]*\.ipa' | head -1)
+            if [ -z "$DL_URL" ]; then
+              DL_URL=$(echo "$PAGE" | grep -oE 'href="[^"]*download[^"]*"' | grep -oE 'https?://[^"]*' | head -1)
+            fi
+
+            # Method 2: armconverter
+            if [ -z "$DL_URL" ]; then
+              echo "Trying armconverter..."
+              DL_URL=$(curl -sL "https://armconverter.com/decryptedappstore" 2>/dev/null | \
+                grep -i "wechat" | grep -oE 'https?://[^"'"'"' ]*\.ipa' | head -1)
+            fi
+
+            # Method 3: backup sources
+            if [ -z "$DL_URL" ]; then
+              echo "Trying backup sources..."
+              for url in \
+                "https://decrypt.day/dl/wechat" \
+                "https://decrypt.day/download/414478124"; do
+                STATUS=$(curl -sL -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
+                if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
+                  DL_URL="$url"
+                  break
+                fi
+              done
+            fi
           fi
 
-          # 方案2: armconverter
           if [ -z "$DL_URL" ]; then
-            echo "  尝试 armconverter..."
-            DL_URL=$(curl -sL "https://armconverter.com/decryptedappstore" 2>/dev/null | \
-              grep -i "wechat" | grep -oE 'https?://[^"'"'"' ]*\.ipa' | head -1)
-          fi
-
-          # 方案3: 已知备用源
-          if [ -z "$DL_URL" ]; then
-            echo "  尝试备用源..."
-            for url in \
-              "https://decrypt.day/dl/wechat" \
-              "https://decrypt.day/download/414478124"; do
-              STATUS=$(curl -sL -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true)
-              if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
-                DL_URL="$url"
-                break
-              fi
-            done
-          fi
-
-          if [ -z "$DL_URL" ]; then
-            echo "❌ 自动获取失败，请手动提供 IPA 链接"
+            echo "ERROR: Cannot find decrypted IPA. Please provide a URL manually."
             exit 1
           fi
 
-          echo "📥 下载: $DL_URL"
+          echo "Downloading: $DL_URL"
           curl -L -o WeChat.ipa "$DL_URL" --connect-timeout 30 --max-time 600
           if [ ! -f WeChat.ipa ] || [ $(stat -f%z WeChat.ipa 2>/dev/null || stat -c%s WeChat.ipa) -lt 10000000 ]; then
-            echo "❌ IPA 下载失败或文件过小"
+            echo "ERROR: IPA download failed or file too small"
             exit 1
           fi
-          echo "✅ IPA 下载完成 ($(du -h WeChat.ipa | cut -f1))"
+          echo "IPA downloaded ($(du -h WeChat.ipa | cut -f1))"
 
-      - name: 注入 dylib
+      - name: Inject dylib
         run: |
-          # 解压 IPA
           mkdir -p _work
           unzip -q WeChat.ipa -d _work
 
-          # 找 .app
           APP_DIR=$(find _work/Payload -name "*.app" -type d | head -1)
           echo "APP: $APP_DIR"
-
-          # 复制 dylib
           cp libWeChatRedPacket.dylib "$APP_DIR/"
 
-          # 注入到二进制
           BINARY="$APP_DIR/$(basename "$APP_DIR" .app)"
           install_name_tool -change @rpath/libWeChatRedPacket.dylib \
             @executable_path/libWeChatRedPacket.dylib "$BINARY" 2>/dev/null || true
 
-          # 用 optool 插入 load command
           if command -v optool &>/dev/null; then
             optool install -c load -p "@executable_path/libWeChatRedPacket.dylib" -t "$BINARY"
           else
-            # 手动添加 LC_LOAD_DYLIB
             python3 -c "
-import struct, sys
+import struct
 dylib_path = b'@executable_path/libWeChatRedPacket.dylib\x00'
 dylib_path = dylib_path + b'\x00' * ((8 - len(dylib_path) % 8) % 8)
 lc = struct.pack('<II', 0x18, len(dylib_path) + 8) + dylib_path
 with open('$BINARY', 'rb') as f: data = f.read()
-# 找到最后一个 load command 末尾
-import struct
 magic = struct.unpack('<I', data[:4])[0]
-if magic == 0xFEEDFACF:  # 64-bit
-    header_size = 32
-    ncmds = struct.unpack('<I', data[16:20])[0]
-else:
-    header_size = 28
-    ncmds = struct.unpack('<I', data[16:20])[0]
-# 插入新 LC
+header_size = 32 if magic == 0xFEEDFACF else 28
+ncmds = struct.unpack('<I', data[16:20])[0]
 new_data = data[:header_size] + lc + data[header_size:]
 new_ncmds = ncmds + 1
 new_data = new_data[:16] + struct.pack('<I', new_ncmds) + new_data[20:]
 with open('$BINARY', 'wb') as f: f.write(new_data)
-            " || echo "手动注入失败，尝试 optool"
+            " || echo "Manual injection failed"
           fi
+          echo "dylib injection done"
 
-          echo "✅ dylib 注入完成"
-
-      - name: Ad-hoc 签名
+      - name: Ad-hoc sign
         run: |
           APP_DIR=$(find _work/Payload -name "*.app" -type d | head -1)
-          # ad-hoc 签名 (不需要证书)
           ldid -S "$APP_DIR/libWeChatRedPacket.dylib" 2>/dev/null || \
             codesign --force --sign - --timestamp=none "$APP_DIR/libWeChatRedPacket.dylib"
           ldid -S "$APP_DIR" 2>/dev/null || \
             codesign --force --sign - --timestamp=none "$APP_DIR"
-          echo "✅ 签名完成"
+          echo "Signing done"
 
-      - name: 打包 IPA
+      - name: Package IPA
         run: |
           cd _work
           zip -qr ../WeChat_RedPacket.ipa Payload/
           cd ..
-          echo "✅ WeChat_RedPacket.ipa 打包完成"
+          echo "WeChat_RedPacket.ipa ready"
 
-      - name: 上传产物
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: WeChat_RedPacket
