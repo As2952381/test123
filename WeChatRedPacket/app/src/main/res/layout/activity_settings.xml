@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    SettingsActivity 布局
+    使用 PreferenceFragment 时通常不需要自定义布局，
+    此文件作为备用保留。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/content"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent" />

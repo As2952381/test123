@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.wp.redpacket'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.wp.redpacket"
+        minSdk 27
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+}
+
+dependencies {
+    // Xposed API (compileOnly — 仅编译时不打包)
+    compileOnly 'de.robv.android.xposed:api:82'
+
+    // LSPosed 环境下也可以使用这个
+    compileOnly 'de.robv.android.xposed:api:82:sources'
+
+    // ── 测试依赖 ──
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-core:5.3.1'
+    testImplementation 'org.robolectric:robolectric:4.10.3'
+}

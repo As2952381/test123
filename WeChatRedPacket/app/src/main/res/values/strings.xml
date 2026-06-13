@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用名称 -->
+    <string name="app_name">微信红包助手</string>
+
+    <!-- 设置项标题与摘要 -->
+    <string name="category_basic">基本设置</string>
+    <string name="pref_enabled_title">启用自动抢红包</string>
+    <string name="pref_enabled_summary">开启后自动检测并领取红包</string>
+
+    <string name="category_delay">延时设置（模拟人类操作）</string>
+    <string name="pref_delay_min_title">最小延时 (毫秒)</string>
+    <string name="pref_delay_min_summary">点击前的最短等待时间，默认 200ms</string>
+    <string name="pref_delay_max_title">最大延时 (毫秒)</string>
+    <string name="pref_delay_max_summary">点击前的最长等待时间，默认 800ms</string>
+
+    <string name="category_advanced">高级设置</string>
+    <string name="pref_wifi_only_title">仅在 Wi-Fi 下运行</string>
+    <string name="pref_wifi_only_summary">开启后移动数据网络下不抢红包</string>
+    <string name="pref_exclude_title">排除群聊关键词</string>
+    <string name="pref_exclude_summary">包含这些关键词的群聊不抢红包（逗号分隔）</string>
+    <string name="pref_exclude_dialog_title">排除关键词</string>
+
+    <!-- Toast / 提示 -->
+    <string name="toast_redpacket_found">发现红包，正在领取…</string>
+    <string name="toast_redpacket_opened">已领取红包</string>
+    <string name="toast_module_disabled">红包助手已禁用</string>
+
+    <!-- 通知 -->
+    <string name="notification_channel_name">红包助手</string>
+    <string name="notification_channel_desc">显示红包领取通知</string>
+    <string name="notification_redpacket_title">红包助手</string>
+    <string name="notification_redpacket_text">已自动领取 %s 的红包</string>
+
+    <!-- 关于 -->
+    <string name="about_title">关于</string>
+    <string name="about_version">版本 1.0</string>
+    <string name="about_description">微信自动抢红包 Xposed 模块\n三层检测策略，不依赖混淆类名</string>
+</resources>

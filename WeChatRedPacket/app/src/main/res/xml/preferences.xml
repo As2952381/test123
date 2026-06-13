@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- 分类：基本设置 -->
+    <PreferenceCategory android:title="基本设置">
+
+        <!-- 总开关 -->
+        <SwitchPreference
+            android:key="enabled"
+            android:title="启用自动抢红包"
+            android:summary="开启后自动检测并领取红包"
+            android:defaultValue="true" />
+
+    </PreferenceCategory>
+
+    <!-- 分类：延时设置 -->
+    <PreferenceCategory android:title="延时设置（模拟人类操作）">
+
+        <!-- 最小延时 -->
+        <EditTextPreference
+            android:key="delay_min"
+            android:title="最小延时 (毫秒)"
+            android:summary="点击前的最短等待时间，默认 200ms"
+            android:defaultValue="200"
+            android:inputType="number" />
+
+        <!-- 最大延时 -->
+        <EditTextPreference
+            android:key="delay_max"
+            android:title="最大延时 (毫秒)"
+            android:summary="点击前的最长等待时间，默认 800ms"
+            android:defaultValue="800"
+            android:inputType="number" />
+
+    </PreferenceCategory>
+
+    <!-- 分类：高级设置 -->
+    <PreferenceCategory android:title="高级设置">
+
+        <!-- 仅WiFi -->
+        <SwitchPreference
+            android:key="wifi_only"
+            android:title="仅在 Wi-Fi 下运行"
+            android:summary="开启后移动数据网络下不抢红包"
+            android:defaultValue="false" />
+
+        <!-- 排除关键词 -->
+        <EditTextPreference
+            android:key="exclude_keywords"
+            android:title="排除群聊关键词"
+            android:summary="包含这些关键词的群聊不抢红包（逗号分隔）"
+            android:defaultValue=""
+            android:dialogTitle="排除关键词" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>
