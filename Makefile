@@ -25,8 +25,7 @@ LDFLAGS  = -arch arm64 \
            -framework Foundation \
            -framework UIKit \
            -framework CoreGraphics \
-           -framework SystemConfiguration \
-           -lc++
+           -framework SystemConfiguration
 
 .PHONY: all clean
 
