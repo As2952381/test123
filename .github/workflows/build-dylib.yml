@@ -1,0 +1,16 @@
+name: Build dylib only
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dylib
+        run: make
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libWeChatRedPacket
+          path: libWeChatRedPacket.dylib
